@@ -1,3 +1,5 @@
-module github.com/npthiennh/nacigo
+module github.com/npt218/nacigo
 
-go 1.26.2
+go 1.22.2
+
+
