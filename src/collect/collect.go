@@ -5,50 +5,138 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"errors"
+	// "os"
+
 	"github.com/npt218/nacigo/src/dbg"
 )
 
-var url string
-var posts []Posts_Json
+var pre_url string
+var prefix string
 
-type Posts_Json struct {
-	ID int;
-	Link string
+type MyJSON struct {
+	ID      	int    	`json:"id"`
+	Link    	string 	`json:"link"`
+	Rendered	string
 }
 
-
 func init() {
-	url = ""
+	pre_url = ""
+	prefix = "out/out_"
+
 }
 
 func Hello() {
-	fmt.Printf("Collect start %s\n", url)
+	fmt.Printf("Collect start %s\n", pre_url)
 }
 
-func Do() {
+func UnmarshalJSON(data []byte) ([]MyJSON, error) {
+	var aux []struct {
+		ID      int    `json:"id"`
+		Link    string `json:"link"`
+		Content struct {
+			Rendered string `json:"rendered"`
+		} `json:"content"`
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return nil, err
+	}
+
+	var result []MyJSON
+	for _, item := range aux {
+		result = append(result, MyJSON{
+			ID:       item.ID,
+			Link:     item.Link,
+			Rendered: item.Content.Rendered,
+		})
+	}
+
+	return result, nil
+}
+
+func Do(number int) ([]MyJSON, error, error) {
+	var page []MyJSON
+
+	url := fmt.Sprintf(pre_url+"%d", number)
+
 	resp, err := http.Get(url)
 
 	if err != nil {
-		dbg.E("Get error!", err)
-		return
+		return nil, nil, err
 	}
-
+	
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 
 	if err != nil {
-		dbg.E("Read error!", err)
-		return
+		return nil, nil, err
 	}
 
-	json_err := json.Unmarshal(body, &posts)
+	page, err = UnmarshalJSON(body)
 
-	if json_err != nil {
-		dbg.E("Decode Json error!", json_err)
-		return
+	if err != nil {
+		var invalid struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(body, &invalid); err != nil {
+			return nil, nil, err
+		}
+		return nil, errors.New("Finish!"), err
 	}
 
-	fmt.Printf("Res: %+v\n", posts)
+	return page, nil, nil
+
+}
+
+func All() {
+	var total []MyJSON
+	page := 0
+	i := 0
+	id := 0
+
+	for {
+		page += 1
+		Res, invalid, err := Do(page)
+
+		fmt.Printf("\rCrawl page: %d", page)
+		if err != nil {
+			if invalid != nil {
+				fmt.Println()
+				break
+			}
+			fmt.Println()
+			msg := fmt.Sprintf("Failed to collect page: %d\n", page)
+			dbg.E(msg, err)
+			break
+		}
+		total = append(total, Res...)
+		
+		if i == 10 {
+			//build data of 10 pages to a json
+			data, err := json.Marshal(total)
+			if err != nil {
+				dbg.E("Build Json", err)
+			}
+			
+			//write json of 10 pages to a file
+			output := fmt.Sprintf(prefix + "%d.json", id)
+			fmt.Println("\nWrite file ", output)
+
+			if err := os.WriteFile(output, data, 0755); err != nil {
+				dbg.E("Write file failed", err)
+			}
+
+			//reset count and json data for new file; increase file id
+			i = 0
+			total = nil
+			id += 1
+		} else {
+			i += 1
+		}
+		
+	}
 
 }
